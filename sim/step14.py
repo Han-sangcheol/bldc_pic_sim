@@ -7,11 +7,14 @@ from collections import deque
 # =================================================================
 # 1. 시스템 상수 및 유틸리티 (이전과 동일)
 # =================================================================
-DT = 25e-6                          
-RPM_TO_RADS = 2 * np.pi / 60        
-RADS_TO_RPM = 60 / (2 * np.pi)      
-V_DC_LINK = 36.0                    
+DT = 25e-6                          # 25us (40kHz 제어 루프)
+RPM_TO_RADS = 2 * np.pi / 60        # RPM을 rad/s로 변환하는 상수
+RADS_TO_RPM = 60 / (2 * np.pi)      # rad/s를 RPM으로 변환하는 상수
+V_DC_LINK = 36.0                    # 인버터 DC 링크 한계 전압
 
+# =================================================================
+# 2. 하드웨어 모사 유틸리티 (ADC & 필터)
+# =================================================================
 class LowPassFilter:
     def __init__(self, cutoff_freq_hz, dt):
         rc = 1.0 / (2.0 * np.pi * cutoff_freq_hz)
@@ -33,6 +36,9 @@ class ADCSimulator:
         quantized = np.round((noisy_value / self.max_range) * (self.levels / 2)) 
         return (quantized / (self.levels / 2)) * self.max_range
 
+# =================================================================
+# 3. PID 제어기 (Conditional Integration Anti-Windup)
+# =================================================================
 class PIDController:
     def __init__(self, kp, ki, dt, out_min, out_max):
         self.kp, self.ki, self.dt = kp, ki, dt
@@ -54,12 +60,16 @@ class PIDController:
             self.integral += i_step
         return out
 
+# =================================================================
+# 4. 센서리스 속도 관측기 (BEMF Observer)
+# =================================================================
 class BEMFObserver:
     def __init__(self, R, L, FluxLinkage, P, dt):
         self.R, self.L, self.FluxLinkage, self.P, self.dt = R, L, FluxLinkage, P, dt
         self.iq_lpf = LowPassFilter(cutoff_freq_hz=500.0, dt=self.dt)
         self.bemf_lpf = LowPassFilter(cutoff_freq_hz=150.0, dt=self.dt)
         self.prev_iq_filtered = 0.0
+
     def estimate_rpm(self, prev_vq, iq_measured):
         iq_filt = self.iq_lpf.update(iq_measured)
         diq_dt_approx = (iq_filt - self.prev_iq_filtered) / self.dt
@@ -68,6 +78,9 @@ class BEMFObserver:
         filtered_bemf = self.bemf_lpf.update(raw_bemf)
         return (filtered_bemf / self.FluxLinkage) / self.P * RADS_TO_RPM
 
+# =================================================================
+# 5. 고속 마이크로 모터 물리 엔진 (Plant)
+# =================================================================
 class HighSpeedMotor:
     def __init__(self):
         self.R = 0.38                   

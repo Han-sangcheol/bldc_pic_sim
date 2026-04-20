@@ -1,11 +1,18 @@
 [project]
-name = "sim"
+name = "motor-sim"
 version = "0.1.0"
-description = "Add your description here"
+description = "SMO 기반 모터 제어 시뮬레이션 프로젝트"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
+# 여기에 필요한 패키지를 나열합니다.
 dependencies = [
-    "matplotlib>=3.10.8",
-    "numpy>=2.4.4",
-    "scipy>=1.17.1",
+    "numpy",
+    "matplotlib",
+    "scipy",
+]
+
+[tool.uv]
+# 개발용 도구 (선택 사항)
+dev-dependencies = [
+    "ipykernel",
 ]

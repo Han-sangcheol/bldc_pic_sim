@@ -39,9 +39,9 @@ class PIDController:
 # =================================================================
 class BEMFObserver:
     def __init__(self, R, L, Ke):
-        self.R = R
-        self.L = L
-        self.Ke = Ke
+        self.R = R          # 저항 [Ohm]
+        self.L = L          # 인덕턴스 [H]
+        self.Ke = Ke        # 역기전력 상수 [V*s/rad]  (V: 전압, s: 시간, rad: 각속도)
 
     def estimate_rpm(self, vq, iq, prev_iq, dt):
         """
@@ -72,10 +72,10 @@ class HighSpeedMotor:
         self.P = 1              # 극쌍수
 
     def update(self, iq, omega, vq, load_torque):
-        diq_dt = (vq - self.R * iq - self.Ke * omega) / self.L
-        te = 1.5 * self.P * self.Kt * iq
-        dw_dt = (te - load_torque - self.B * omega) / self.J
-        return diq_dt, dw_dt
+        diq_dt = (vq - self.R * iq - self.Ke * omega) / self.L  # 전기적 모델: Vq = R*iq + L*(diq/dt) + Ke*omega
+        te = 1.5 * self.P * self.Kt * iq                    # 기계적 모델: Te = 1.5 * P * Kt * iq (BLDC/PMSM 근사)
+        dw_dt = (te - load_torque - self.B * omega) / self.J        # 기계적 모델: dw/dt = (Te - Load_Torque - B*omega) / J
+        return diq_dt, dw_dt                                # diq/dt와 dw/dt 반환
 
 # =================================================================
 # 5. 마스터 시뮬레이션 통합 실행

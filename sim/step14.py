@@ -176,107 +176,111 @@ class RealTimeSimulation:
 # =================================================================
 # 3. Matplotlib GUI 대시보드 구축
 # =================================================================
-sim = RealTimeSimulation()
+def main():
+    sim = RealTimeSimulation()
 
-# 화면에 표시할 시간 길이 (예: 과거 1.5초치 데이터를 화면에 표시)
-DISPLAY_TIME = 1.5 
-BUFFER_SIZE = int((DISPLAY_TIME / DT) / 20) # 20스텝마다 로깅하므로 크기 조절
+    # 화면에 표시할 시간 길이 (예: 과거 1.5초치 데이터를 화면에 표시)
+    DISPLAY_TIME = 1.5 
+    BUFFER_SIZE = int((DISPLAY_TIME / DT) / 20) # 20스텝마다 로깅하므로 크기 조절
 
-# Rolling Buffer (오른쪽으로 데이터가 들어오고 왼쪽으로 빠짐)
-history = {
-    't': deque(maxlen=BUFFER_SIZE),
-    'cmd_rpm': deque(maxlen=BUFFER_SIZE), 'act_rpm': deque(maxlen=BUFFER_SIZE), 'est_rpm': deque(maxlen=BUFFER_SIZE),
-    'iq': deque(maxlen=BUFFER_SIZE), 'vq': deque(maxlen=BUFFER_SIZE), 'load': deque(maxlen=BUFFER_SIZE)
-}
+    # Rolling Buffer (오른쪽으로 데이터가 들어오고 왼쪽으로 빠짐)
+    history = {
+        't': deque(maxlen=BUFFER_SIZE),
+        'cmd_rpm': deque(maxlen=BUFFER_SIZE), 'act_rpm': deque(maxlen=BUFFER_SIZE), 'est_rpm': deque(maxlen=BUFFER_SIZE),
+        'iq': deque(maxlen=BUFFER_SIZE), 'vq': deque(maxlen=BUFFER_SIZE), 'load': deque(maxlen=BUFFER_SIZE)
+    }
 
-# GUI 전역 상태 변수
-gui_state = {'target_rpm': 40000.0, 'base_load': 0.0, 'is_on': False}
+    # GUI 전역 상태 변수
+    gui_state = {'target_rpm': 40000.0, 'base_load': 0.0, 'is_on': False}
 
-# 레이아웃 설정
-fig, axs = plt.subplots(4, 1, figsize=(12, 9))
-plt.subplots_adjust(bottom=0.25, hspace=0.4)
-fig.canvas.manager.set_window_title("Real-Time Motor FOC Dashboard")
+    # 레이아웃 설정
+    fig, axs = plt.subplots(4, 1, figsize=(12, 9))
+    plt.subplots_adjust(bottom=0.25, hspace=0.4)
+    fig.canvas.manager.set_window_title("Real-Time Motor FOC Dashboard")
 
-# 그래프 선 객체 미리 생성
-line_cmd, = axs[0].plot([], [], 'r--', label='Command RPM', lw=2)
-line_act, = axs[0].plot([], [], 'b-', label='Actual RPM', lw=2, alpha=0.7)
-line_est, = axs[0].plot([], [], 'g-', label='Estimated RPM', lw=1, alpha=0.8)
-line_iq,  = axs[1].plot([], [], 'gray', label='Sensed Iq (ADC)', alpha=0.8)
-line_vq,  = axs[2].plot([], [], 'm-', label='Vq Command (PWM)')
-line_ld,  = axs[3].plot([], [], 'orange', label='Dynamic Load Torque', lw=2)
+    # 그래프 선 객체 미리 생성
+    line_cmd, = axs[0].plot([], [], 'r--', label='Command RPM', lw=2)
+    line_act, = axs[0].plot([], [], 'b-', label='Actual RPM', lw=2, alpha=0.7)
+    line_est, = axs[0].plot([], [], 'g-', label='Estimated RPM', lw=1, alpha=0.8)
+    line_iq,  = axs[1].plot([], [], 'gray', label='Sensed Iq (ADC)', alpha=0.8)
+    line_vq,  = axs[2].plot([], [], 'm-', label='Vq Command (PWM)')
+    line_ld,  = axs[3].plot([], [], 'orange', label='Dynamic Load Torque', lw=2)
 
-# Y축 범위 고정 (그래프가 위아래로 널뛰기 하는 것 방지)
-axs[0].set_ylim(-2000, 45000); axs[0].set_ylabel("Speed [RPM]"); axs[0].legend(loc='upper left'); axs[0].grid(True)
-axs[1].set_ylim(-15, 15);      axs[1].set_ylabel("Current [A]"); axs[1].legend(loc='upper left'); axs[1].grid(True)
-axs[2].set_ylim(-40, 40);      axs[2].set_ylabel("Voltage [V]"); axs[2].legend(loc='upper left'); axs[2].grid(True)
-axs[3].set_ylim(-0.01, 0.1);   axs[3].set_ylabel("Torque [Nm]"); axs[3].legend(loc='upper left'); axs[3].grid(True)
-axs[3].set_xlabel("Time [s]")
+    # Y축 범위 고정 (그래프가 위아래로 널뛰기 하는 것 방지)
+    axs[0].set_ylim(-2000, 45000); axs[0].set_ylabel("Speed [RPM]"); axs[0].legend(loc='upper left'); axs[0].grid(True)
+    axs[1].set_ylim(-15, 15);      axs[1].set_ylabel("Current [A]"); axs[1].legend(loc='upper left'); axs[1].grid(True)
+    axs[2].set_ylim(-40, 40);      axs[2].set_ylabel("Voltage [V]"); axs[2].legend(loc='upper left'); axs[2].grid(True)
+    axs[3].set_ylim(-0.01, 0.1);   axs[3].set_ylabel("Torque [Nm]"); axs[3].legend(loc='upper left'); axs[3].grid(True)
+    axs[3].set_xlabel("Time [s]")
 
-# ---------------- 컨트롤 패널 (Sliders & Buttons) ----------------
-ax_rpm  = plt.axes([0.15, 0.15, 0.65, 0.03], facecolor='lightcyan')
-ax_load = plt.axes([0.15, 0.10, 0.65, 0.03], facecolor='lightgoldenrodyellow')
-ax_btn  = plt.axes([0.85, 0.10, 0.1, 0.08])
+    # ---------------- 컨트롤 패널 (Sliders & Buttons) ----------------
+    ax_rpm  = plt.axes([0.15, 0.15, 0.65, 0.03], facecolor='lightcyan')
+    ax_load = plt.axes([0.15, 0.10, 0.65, 0.03], facecolor='lightgoldenrodyellow')
+    ax_btn  = plt.axes([0.85, 0.10, 0.1, 0.08])
 
-slider_rpm = Slider(ax_rpm, 'Target RPM', 0.0, 45000.0, valinit=40000.0, valstep=1000)
-slider_load = Slider(ax_load, 'Base Load [Nm]', 0.0, 0.08, valinit=0.0, valstep=0.005)
-btn_onoff = Button(ax_btn, 'TURN ON', color='lightcoral', hovercolor='red')
+    slider_rpm = Slider(ax_rpm, 'Target RPM', 0.0, 45000.0, valinit=40000.0, valstep=1000)
+    slider_load = Slider(ax_load, 'Base Load [Nm]', 0.0, 0.08, valinit=0.0, valstep=0.005)
+    btn_onoff = Button(ax_btn, 'TURN ON', color='lightcoral', hovercolor='red')
 
-def update_gui_vars(val):
-    gui_state['target_rpm'] = slider_rpm.val
-    gui_state['base_load'] = slider_load.val
+    def update_gui_vars(val):
+        gui_state['target_rpm'] = slider_rpm.val
+        gui_state['base_load'] = slider_load.val
 
-def toggle_power(event):
-    gui_state['is_on'] = not gui_state['is_on']
-    if gui_state['is_on']:
-        btn_onoff.label.set_text('TURN OFF')
-        btn_onoff.color = 'lightgreen'
-    else:
-        btn_onoff.label.set_text('TURN ON')
-        btn_onoff.color = 'lightcoral'
-    fig.canvas.draw_idle()
+    def toggle_power(event):
+        gui_state['is_on'] = not gui_state['is_on']
+        if gui_state['is_on']:
+            btn_onoff.label.set_text('TURN OFF')
+            btn_onoff.color = 'lightgreen'
+        else:
+            btn_onoff.label.set_text('TURN ON')
+            btn_onoff.color = 'lightcoral'
+        fig.canvas.draw_idle()
 
-slider_rpm.on_changed(update_gui_vars)
-slider_load.on_changed(update_gui_vars)
-btn_onoff.on_clicked(toggle_power)
+    slider_rpm.on_changed(update_gui_vars)
+    slider_load.on_changed(update_gui_vars)
+    btn_onoff.on_clicked(toggle_power)
 
-# ---------------- 애니메이션 루프 ----------------
-def update_plot(frame):
-    # 화면 갱신 주기(예: 30FPS -> 약 33ms) 동안 발생해야 할 시뮬레이션 스텝 수 계산
-    # 33ms / 25us = 약 1320 steps. 여유롭게 1500 스텝씩 처리하여 실시간성을 맞춤
-    STEPS_PER_FRAME = 1500 
-    
-    # 물리 엔진 구동 및 데이터 수집
-    data = sim.step(gui_state['target_rpm'], gui_state['base_load'], gui_state['is_on'], steps=STEPS_PER_FRAME)
-    
-    # 원형 버퍼에 데이터 추가
-    history['t'].extend(data['t'])
-    history['cmd_rpm'].extend(data['cmd_rpm'])
-    history['act_rpm'].extend(data['act_rpm'])
-    history['est_rpm'].extend(data['est_rpm'])
-    history['iq'].extend(data['iq'])
-    history['vq'].extend(data['vq'])
-    history['load'].extend(data['load'])
-    
-    # 버퍼에 데이터가 찼을 때만 그래프 렌더링
-    if len(history['t']) > 0:
-        t_arr = np.array(history['t'])
+    # ---------------- 애니메이션 루프 ----------------
+    def update_plot(frame):
+        # 화면 갱신 주기(예: 30FPS -> 약 33ms) 동안 발생해야 할 시뮬레이션 스텝 수 계산
+        # 33ms / 25us = 약 1320 steps. 여유롭게 1500 스텝씩 처리하여 실시간성을 맞춤
+        STEPS_PER_FRAME = 1500 
         
-        line_cmd.set_data(t_arr, history['cmd_rpm'])
-        line_act.set_data(t_arr, history['act_rpm'])
-        line_est.set_data(t_arr, history['est_rpm'])
-        line_iq.set_data(t_arr, history['iq'])
-        line_vq.set_data(t_arr, history['vq'])
-        line_ld.set_data(t_arr, history['load'])
+        # 물리 엔진 구동 및 데이터 수집
+        data = sim.step(gui_state['target_rpm'], gui_state['base_load'], gui_state['is_on'], steps=STEPS_PER_FRAME)
         
-        # X축을 가장 최근 시간에 맞춰 오실로스코프처럼 스크롤되도록 설정
-        t_max = t_arr[-1]
-        t_min = t_max - DISPLAY_TIME
-        for ax in axs:
-            ax.set_xlim(t_min, t_max)
+        # 원형 버퍼에 데이터 추가
+        history['t'].extend(data['t'])
+        history['cmd_rpm'].extend(data['cmd_rpm'])
+        history['act_rpm'].extend(data['act_rpm'])
+        history['est_rpm'].extend(data['est_rpm'])
+        history['iq'].extend(data['iq'])
+        history['vq'].extend(data['vq'])
+        history['load'].extend(data['load'])
+        
+        # 버퍼에 데이터가 찼을 때만 그래프 렌더링
+        if len(history['t']) > 0:
+            t_arr = np.array(history['t'])
             
-    return line_cmd, line_act, line_est, line_iq, line_vq, line_ld
+            line_cmd.set_data(t_arr, history['cmd_rpm'])
+            line_act.set_data(t_arr, history['act_rpm'])
+            line_est.set_data(t_arr, history['est_rpm'])
+            line_iq.set_data(t_arr, history['iq'])
+            line_vq.set_data(t_arr, history['vq'])
+            line_ld.set_data(t_arr, history['load'])
+            
+            # X축을 가장 최근 시간에 맞춰 오실로스코프처럼 스크롤되도록 설정
+            t_max = t_arr[-1]
+            t_min = t_max - DISPLAY_TIME
+            for ax in axs:
+                ax.set_xlim(t_min, t_max)
+                
+        return line_cmd, line_act, line_est, line_iq, line_vq, line_ld
 
-# 애니메이션 실행 (interval=30은 약 30ms 마다 화면 갱신을 의미)
-ani = FuncAnimation(fig, update_plot, interval=30, blit=False, cache_frame_data=False)
+    # 애니메이션 실행 (interval=30은 약 30ms 마다 화면 갱신을 의미)
+    ani = FuncAnimation(fig, update_plot, interval=30, blit=False, cache_frame_data=False)
 
-plt.show()
+    plt.show()
+
+if __name__ == "__main__":
+    main()

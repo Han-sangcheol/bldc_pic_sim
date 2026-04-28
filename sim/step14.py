@@ -17,10 +17,16 @@ V_DC_LINK = 36.0                    # 인버터 DC 링크 한계 전압
 # =================================================================
 class LowPassFilter:
     def __init__(self, cutoff_freq_hz, dt):
+        # 1차 저역통과필터(Low Pass Filter)의 시정수(RC) 계산
+        # RC = 1 / (2 * pi * f_c)
         rc = 1.0 / (2.0 * np.pi * cutoff_freq_hz)
+        # 이산 시간(Discrete Time)에서의 필터 계수 (Alpha)
+        # Alpha = dt / (RC + dt)
         self.alpha = dt / (rc + dt)
         self.out_prev = 0.0
     def update(self, input_val):
+        # 1차 LPF 차분 방정식 (차단 주파수 이상의 고주파 노이즈 제거 목적)
+        # Y[n] = Alpha * X[n] + (1 - Alpha) * Y[n-1]
         out = self.alpha * input_val + (1.0 - self.alpha) * self.out_prev
         self.out_prev = out
         return out
@@ -31,9 +37,14 @@ class ADCSimulator:
         self.max_range = max_range
         self.noise_std = noise_std
     def read(self, true_value):
+        # 1. 실제 값에 정규분포(가우시안) 화이트 노이즈 추가
         noisy_value = true_value + np.random.normal(0, self.noise_std)
+        # 2. ADC 측정 가능 범위(-max_range ~ +max_range)로 클리핑
         noisy_value = np.clip(noisy_value, -self.max_range, self.max_range)
+        # 3. 아날로그 값을 디지털 수준(레벨)의 정수로 양자화(Quantization)
+        # Quantized_Value = round( (noisy_value / max_range) * (levels / 2) )
         quantized = np.round((noisy_value / self.max_range) * (self.levels / 2)) 
+        # 4. 양자화된 디지털 값을 다시 물리적인 아날로그 값으로 복원
         return (quantized / (self.levels / 2)) * self.max_range
 
 # =================================================================
@@ -45,18 +56,30 @@ class PIDController:
         self.out_min, self.out_max = out_min, out_max
         self.integral = 0.0
     def compute(self, setpoint, measurement):
+        # 오차(Error) 계산: E[n] = Setpoint - Measurement
         error = setpoint - measurement
+        
+        # 비례항(Proportional) 계산: P_out = Kp * E[n]
         p_out = self.kp * error
+        
+        # 적분항(Integral) 스텝 누적값 계산 (직사각형 근사법): I_step = Ki * E[n] * dt
         i_step = self.ki * error * self.dt
+        
+        # 임시 제어 출력값 (PI 출력): Out = P_out + (기존 누적된 적분값) + I_step
         out = p_out + self.integral + i_step
 
+        # 안티 와인드업(Anti-Windup): 제어 출력이 물리적 한계치(포화)를 넘었을 때 
+        # 적분항이 계속 누적되어 발산하는 것을 막는 Conditional Integration 방식
         if out > self.out_max:
             out = self.out_max
+            # 출력이 최대치에 포화되었지만, 오차가 음수(제어출력을 낮추려는 방향)일 때만 적분 허용
             if error < 0: self.integral += i_step  
         elif out < self.out_min:
             out = self.out_min
+            # 출력이 최소치에 포화되었지만, 오차가 양수(제어출력을 높이려는 방향)일 때만 적분 허용
             if error > 0: self.integral += i_step  
         else:
+            # 출력 포화가 아니면 정상적으로 적분 누적
             self.integral += i_step
         return out
 
@@ -71,11 +94,25 @@ class BEMFObserver:
         self.prev_iq_filtered = 0.0
 
     def estimate_rpm(self, prev_vq, iq_measured):
+        # 1. 측정된 전류의 노이즈 성분을 제거하기 위한 로우 패스 필터 통과
         iq_filt = self.iq_lpf.update(iq_measured)
+        
+        # 2. 전류의 시간에 따른 변화율(미분) 근사: di/dt = (I[n] - I[n-1]) / dt
+        # 역기전력 추정 시 인덕턴스에 걸리는 전압 강하(L * di/dt)를 계산하기 위함
         diq_dt_approx = (iq_filt - self.prev_iq_filtered) / self.dt
         self.prev_iq_filtered = iq_filt
+        
+        # 3. 역기전력(BEMF, E) 추정 공식:
+        # V = R*I + L*(di/dt) + E  =>  E = V - R*I - L*(di/dt)
         raw_bemf = prev_vq - (self.R * iq_filt) - (self.L * diq_dt_approx)
+        
+        # 4. 미분항(di/dt)으로 인해 증폭된 고주파 노이즈를 필터로 제거하여 안정화
         filtered_bemf = self.bemf_lpf.update(raw_bemf)
+        
+        # 5. 역기전력과 기계적 속도의 관계: 
+        # 전기각속도(omega_e) = E / FluxLinkage
+        # 기계각속도(omega_m) = omega_e / 극쌍수(P)
+        # 최종적으로 rad/s를 RPM으로 변환
         return (filtered_bemf / self.FluxLinkage) / self.P * RADS_TO_RPM
 
 # =================================================================
@@ -90,10 +127,25 @@ class HighSpeedMotor:
         self.B = 4.5e-7                 
         self.P = 1                      
     def update(self, iq, omega_m, vq_inverter, load_torque, dt):
+        # 1. 기계각속도를 전기각속도로 변환: omega_e = omega_m * 극쌍수(P)
         omega_e = omega_m * self.P
+        
+        # 2. q축 전압 방정식 (모터 전기적 모델 미분방정식):
+        # Vq = R*Iq + L*(diq/dt) + omega_e*FluxLinkage
+        # -> 전류의 변화율 (diq/dt) = (Vq - R*Iq - omega_e*FluxLinkage) / L
         diq_dt = (vq_inverter - self.R * iq - omega_e * self.FluxLinkage) / self.L
+        
+        # 3. 발생 토크 방정식 (표면부착형 PMSM 기준, d축 전류=0 가정 시):
+        # Te = 1.5 * P * FluxLinkage * Iq
         te = 1.5 * self.P * self.FluxLinkage * iq
+        
+        # 4. 모터 기계적 모델 관성 방정식:
+        # J*(dw_m/dt) = Te - T_load - B*w_m
+        # -> 가속도 (dw/dt) = (Te - T_load - B*omega_m) / J
         dw_dt = (te - load_torque - self.B * omega_m) / self.J
+        
+        # 5. 오일러 적분(Euler Integration)을 사용하여 다음 스텝(dt 이후)의 시뮬레이션 상태값 갱신
+        # x_new = x_old + (dx/dt) * dt
         return iq + diq_dt * dt, omega_m + dw_dt * dt
 
 # =================================================================
@@ -127,7 +179,11 @@ class RealTimeSimulation:
             self.t_current += DT
             act_rpm = self.true_omega_m * RADS_TO_RPM
             
+            # -------------------------------------------------------------
             # 동적 가변 부하 생성 (OFF 상태이거나 회전하지 않을 때는 부하 제거)
+            # 모터가 일정 속도(1000RPM) 이상일 때, 기본 부하(base_load) 위에 
+            # 5Hz(저주파) 및 50Hz(고주파) 진동 부하와 랜덤 노이즈를 겹침
+            # -------------------------------------------------------------
             load_torque = 0.0
             if is_on and act_rpm > 1000:
                 low_freq = 0.008 * np.sin(2 * np.pi * 5.0 * self.t_current)
@@ -139,22 +195,35 @@ class RealTimeSimulation:
             est_rpm = self.observer.estimate_rpm(self.prev_vq_cmd, sensed_iq) 
             self.prev_vq_cmd = self.vq_cmd 
             
-            # S-Curve 램프 제어
+            # -------------------------------------------------------------
+            # S-Curve 램프 제어 (가속/감속 프로파일 생성)
+            # 목표 속도에 도달하기 전까지 jerk(가가속도) 단위로 가속도를 증가/감소시켜
+            # 부드러운 형태의 S자 가감속 곡선을 만듦으로써 기계적 충격을 완화함
+            # -------------------------------------------------------------
             if self.cmd_rpm < actual_target_rpm:
+                # 제동 거리 근사 계산: v^2 = 2as 변형 -> s = v^2 / 2a
                 stopping_dist = (self.accel_step**2) / (2 * self.jerk_step) + (self.accel_step * 2.0) 
                 if (actual_target_rpm - self.cmd_rpm) <= stopping_dist:
+                    # 목표 속도에 가까워지면 가속도를 줄여 곡선을 부드럽게 꺾음
                     self.accel_step = max(0.0001, self.accel_step - self.jerk_step)
                 else:
+                    # 초반에는 최대 가속도에 도달할 때까지 점진적 가속 증가
                     self.accel_step = min(self.max_accel_step, self.accel_step + self.jerk_step)
                 self.cmd_rpm = min(actual_target_rpm, self.cmd_rpm + self.accel_step)
             elif self.cmd_rpm > actual_target_rpm:
-                self.cmd_rpm = max(actual_target_rpm, self.cmd_rpm - 15.0) # 감속은 조금 더 빠르게
+                # 감속 상황 (강제적으로 일정 비율로 감속)
+                self.cmd_rpm = max(actual_target_rpm, self.cmd_rpm - 15.0) 
 
             # 인버터 완전 정지 (Free-wheeling) 조건
             if not is_on and self.cmd_rpm < 100.0 and act_rpm < 100.0:
                 self.vq_cmd = 0.0
                 self.cmd_rpm = 0.0
             else:
+                # -------------------------------------------------------------
+                # 캐스케이드 PID 제어루프 (Cascade PID Control)
+                # 1. 속도제어기: 지령속도와 추정속도(센서리스)의 오차로 목표 Q축 전류(iq_ref) 연산
+                # 2. 전류제어기: 목표 전류와 센싱된 측정 전류의 오차로 지령 전압(vq_cmd) 연산
+                # -------------------------------------------------------------
                 iq_ref = self.speed_ctrl.compute(self.cmd_rpm, est_rpm)
                 self.vq_cmd = self.current_ctrl.compute(iq_ref, sensed_iq)
             
